@@ -1,0 +1,11 @@
+[config]
+model="gpt-4o"
+
+[pr_reviewer]
+extra_instructions="レビューコメントは日本語で記述してください。"
+
+[pr_description]
+extra_instructions="PR概要は日本語で記述してください。"
+
+[pr_code_suggestions]
+extra_instructions="コード提案のコメントは日本語で記述してください。"
