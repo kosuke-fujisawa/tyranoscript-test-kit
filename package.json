@@ -1,0 +1,35 @@
+{
+  "name": "tyranoscript-test-kit",
+  "version": "0.1.0",
+  "description": "TyranoScript作品向けのE2Eテストヘルパー(Playwright)とシナリオ静的検査ツール",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kosuke-fujisawa/tyranoscript-test-kit.git"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "main": "src/e2e-helpers.js",
+  "exports": {
+    ".": "./src/e2e-helpers.js",
+    "./e2e-helpers": "./src/e2e-helpers.js",
+    "./check-scenario": "./src/check-scenario.js"
+  },
+  "bin": {
+    "tyrano-check-scenario": "bin/check-scenario.mjs"
+  },
+  "files": [
+    "src",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@playwright/test": ">=1.40.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
