@@ -33,3 +33,9 @@ npm test
 
 `test/fixtures/{ok,broken}/`に検査対象のサンプルシナリオを置き、`checkScenario()`が
 期待通りの結果を返すことを検証する。
+
+## CI / PRレビュー
+
+push/PRで`npm test`を実行するCI(`.github/workflows/ci.yml`)に加え、PR-Agent
+(`.github/workflows/pr-agent.yml`、OpenAI GPT-4o)がPRオープン・更新時に
+自動でレビュー・概要生成を行う。設定は`.pr_agent.toml`。
