@@ -1,9 +1,47 @@
 # tyranoscript-test-kit
 
+[![CI](https://github.com/kosuke-fujisawa/tyranoscript-test-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/kosuke-fujisawa/tyranoscript-test-kit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 [TyranoScript](https://tyrano.jp/)製ノベルゲーム作品向けの、E2Eテストヘルパー(Playwright)と
 シナリオ静的検査ツール。複数のTyranoScript作品([arikoi](https://github.com/kosuke-fujisawa/arikoi)、
 [quality-prism](https://github.com/kosuke-fujisawa/quality-prism))で重複していた
 テスト基盤を切り出したもの。
+
+## これは何?
+
+TyranoScriptでノベルゲームを作っていると、作品が違っても次のような作業が共通して発生する。
+
+- Playwrightで「タイトル画面を開く → 選択肢を押す → 文字送りを進める」というE2Eテストを書く
+- `.ks`シナリオの中で、存在しないラベルへジャンプしていないか・存在しない画像や音声を
+  参照していないかをCIで検査する
+
+このパッケージは、その「作品に依存しない共通部分」だけを切り出したもの。ゲーム本編の
+シナリオやキャラクター、作品固有のテストケースは含まない。TyranoScript製ゲームの
+リポジトリに`devDependencies`として追加し、ここが提供するヘルパー・CLIを土台に
+各作品固有のテストを書く想定で使う。
+
+## 前提条件
+
+- Node.js 18以上
+- [Playwright](https://playwright.dev/)(`@playwright/test`、`>=1.40.0`)を導入済みのプロジェクト
+  (E2Eヘルパーを使う場合。peerDependencyとして定義)
+- 検査対象のTyranoScriptプロジェクトが`data/scenario/`(`.ks`シナリオ)・`data/`(画像・音声等の
+  アセット)という標準的なディレクトリ構成であること
+- E2Eヘルパーは、TyranoScript標準の`.glink_button`クラスを持つリンク型選択肢を前提にしている
+
+## クイックスタート
+
+```sh
+# 1. インストール(git依存としてdevDependenciesに追加される)
+npm install -D github:kosuke-fujisawa/tyranoscript-test-kit#v0.2.0
+
+# 2. シナリオの静的検査をまず一度実行してみる
+npx tyrano-check-scenario --scenario-dir data/scenario --data-dir data
+```
+
+問題があれば`静的検査: FAIL`と該当のエラー一覧が表示される(終了コードも1になる)。
+E2Eヘルパーの使い方は下記「使い方」を参照。
 
 ## スコープ
 
@@ -17,7 +55,9 @@
 
 ## インストール
 
-npmレジストリへは未発行。GitHubからgit依存として参照する。
+npmレジストリへは未発行。GitHubからgit依存として参照する
+(上記クイックスタートの`npm install -D`コマンドで十分だが、`package.json`を直接編集する
+場合は以下のように書く)。
 
 ```jsonc
 // package.json
@@ -27,6 +67,8 @@ npmレジストリへは未発行。GitHubからgit依存として参照する�
   }
 }
 ```
+
+バージョンを上げる際は`#v0.2.0`の部分を対象タグに変更し、`npm install`し直す。
 
 ## 使い方
 
@@ -42,11 +84,26 @@ test("start -> ending", async ({ page }) => {
 });
 ```
 
+| 関数 | 役割 |
+|---|---|
+| `openTitle(page, buttonText)` | タイトル画面を開き、`buttonText`を持つglinkボタンが表示されるまで待つ(初回起動を考慮して長めに待機) |
+| `glink(page, hasText)` | `hasText`を持つglinkボタン(選択肢リンク)のLocatorを返す |
+| `clickGlink(page, hasText, maxAttempts?)` | glinkボタンをクリックする。アニメーション起因でクリックが無視される場合に自動リトライする |
+| `advanceUntilVisible(page, text, maxClicks?)` | `text`が表示されるまでメッセージ領域をクリックして進める |
+| `advanceUntil(page, target, maxClicks?, clickPoint?)` | 任意のLocatorが表示されるまでクリックして進める(`advanceUntilVisible`の汎用版) |
+| `waitForTextSettled(page)` | 文字送りアニメーションの完了を待つ。セーブ処理の直前に必須 |
+
 ### シナリオ静的検査(CLI)
 
 ```sh
 npx tyrano-check-scenario --scenario-dir data/scenario --data-dir data --exclude tyrano.ks
 ```
+
+| オプション | 既定値 | 説明 |
+|---|---|---|
+| `--scenario-dir` | `data/scenario` | 検査対象の`.ks`シナリオを探すディレクトリ |
+| `--data-dir` | `data` | 画像・音声などアセットを探す起点ディレクトリ |
+| `--exclude` | `tyrano.ks` | 検査から除外するファイル名(カンマ区切りで複数指定可) |
 
 `package.json`の`scripts`に登録する例:
 
@@ -98,6 +155,17 @@ const { fileCount, errors } = checkScenario({
 これらのより踏み込んだ検査は、エディタ向けのTyranoScript Language Server
 ([tyranoscript-lsp](https://github.com/void2610/tyranoscript-lsp))がワークスペース索引を
 前提に実装している。本パッケージはCIでそのまま実行できる軽量な検査に用途を絞っている。
+
+## コントリビュート
+
+```sh
+git clone https://github.com/kosuke-fujisawa/tyranoscript-test-kit.git
+cd tyranoscript-test-kit
+npm test
+```
+
+開発方針(ゲーム非依存を保つ・汎用化しすぎない、等)は[AGENTS.md](./AGENTS.md)を参照。
+PRを送るとCI(`npm test`)に加え、CodeRabbitとPR-Agentによる自動レビューが実行される。
 
 ## ライセンス
 
