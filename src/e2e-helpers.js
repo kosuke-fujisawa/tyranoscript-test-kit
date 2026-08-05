@@ -43,6 +43,7 @@ export function glink(page, hasText) {
  * @param {import('@playwright/test').Page} page
  * @param {string} hasText
  * @param {number} [maxAttempts]
+ * @throws {Error} maxAttempts回クリックしてもボタンが消えず、遷移を確認できなかった場合
  */
 export async function clickGlink(page, hasText, maxAttempts = 5) {
   const target = glink(page, hasText);
@@ -53,6 +54,7 @@ export async function clickGlink(page, hasText, maxAttempts = 5) {
     await page.waitForTimeout(400);
     if (!(await glink(page, hasText).isVisible().catch(() => false))) return;
   }
+  throw new Error(`clickGlink("${hasText}"): ${maxAttempts}回クリックしても遷移を確認できませんでした`);
 }
 
 /**
