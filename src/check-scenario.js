@@ -11,9 +11,17 @@
 //      chara_newで定義されているか(プロジェクト全体で横断的にキャラクターを解決する。
 //      TyranoScriptのchara_*タグはファイルスコープではなくランタイム全体で共有される
 //      状態を操作するため、ラベル参照のようにファイル単位では解決しない)
+//   7. [jump]/[return]の直後にあり、かつプロジェクト内のどこからも参照されない
+//      ラベルの検出(未参照ラベル警告)。直前の行が静的なstorage/targetを持つ
+//      [jump]または[return]の場合のみ「フォールスルーで到達しない」とみなす
+//      保守的な判定(誤検知を避けるため、選択肢グループの後や[s]の後は対象外)。
+//      storage="&式"/target="&式"による動的ジャンプを含むファイルは、到達可否を
+//      静的に判定できないため検査対象から除外する
 //
 // 対象外(意図的なスコープ外):
-//   - 到達不能な分岐の検出(制御フロー解析が必要なため)
+//   - 完全な到達可能性解析(選択肢分岐・複雑な制御フローを網羅した到達不能検出。
+//     [iscript]やマクロによる動的な制御フローがあり誤検知率が高いため見送り。
+//     項目7は「静的jump/returnの直後」という限定条件のみを対象とする)
 //   - 未定義変数の検出(f/sfは動的に生成されるため静的な網羅は困難)
 //   - 未使用ラベル・未使用キャラクターの検出(ファイル間の実行順序に依存するため、
 //     誤検知率が高いと判断し見送った。必要になれば別途追加する)
@@ -268,6 +276,65 @@ export function checkScenario(options) {
             }
           }
         }
+      });
+    }
+  }
+
+  // --- 7: [jump]/[return]直後の未参照ラベル検出(動的ジャンプを含むファイルはスキップ) ---
+  {
+    const jumpLikeRe = /\[(?:jump|call|glink|button)\b[^\]]*\]/g;
+    const referenced = new Set(); // "file::label"
+    const hasDynamicJump = new Map(); // file -> boolean
+
+    for (const [key, content] of contentByFile) {
+      let dynamic = false;
+      for (const line of content.split(/\r?\n/)) {
+        if (line.trim().startsWith(";")) continue;
+        const tags = line.match(jumpLikeRe);
+        if (!tags) continue;
+        for (const tagText of tags) {
+          const storageMatch = tagText.match(/\bstorage="([^"]*)"/);
+          const targetMatch = tagText.match(/\btarget="([^"]*)"/);
+          if (
+            (storageMatch && storageMatch[1].startsWith("&")) ||
+            (targetMatch && targetMatch[1].startsWith("&"))
+          ) {
+            dynamic = true;
+            continue;
+          }
+          const targetFileKey =
+            storageMatch && !storageMatch[1].startsWith("&") ? storageMatch[1] : key;
+          if (targetMatch && targetMatch[1].startsWith("*")) {
+            referenced.add(`${targetFileKey}::${targetMatch[1].slice(1)}`);
+          }
+        }
+      }
+      hasDynamicJump.set(key, dynamic);
+    }
+
+    for (const [key, content] of contentByFile) {
+      if (EXCLUDE_FILES.has(key)) continue;
+      if (hasDynamicJump.get(key)) continue;
+
+      const lines = content.split(/\r?\n/);
+      let cutByJump = false;
+      lines.forEach((line, idx) => {
+        const trimmed = line.trim();
+        if (trimmed === "" || trimmed.startsWith(";")) return;
+
+        const labelMatch = trimmed.match(/^\*([A-Za-z0-9_]+)/);
+        if (labelMatch) {
+          const label = labelMatch[1];
+          if (cutByJump && !referenced.has(`${key}::${label}`)) {
+            errors.push(
+              `${key}:${idx + 1}: ラベル "*${label}" は [jump]/[return] の直後にありますが、プロジェクト内のどこからも参照されていません(到達不能の可能性)`,
+            );
+          }
+          cutByJump = false;
+          return;
+        }
+
+        cutByJump = /^\[(?:jump|return)\b[^\]]*\]$/.test(trimmed);
       });
     }
   }

@@ -47,4 +47,21 @@ test("壊れたシナリオで既知の問題をすべて検出する", () => {
     errors.some((e) => e.includes('graphic="does_not_exist.png"')),
     "glinkのgraphic参照アセット欠落を検出できていない",
   );
+  assert.ok(
+    errors.some((e) => e.includes('ラベル "*dead_end"') && e.includes("参照されていません")),
+    "[jump]直後の未参照ラベルを検出できていない",
+  );
+});
+
+test("動的ジャンプ(storage=\"&...\")を含むファイルは未参照ラベル検査をスキップする", () => {
+  const root = join(HERE, "fixtures", "dynamic-jump", "data");
+  const { errors } = checkScenario({
+    scenarioDir: join(root, "scenario"),
+    dataDir: root,
+  });
+  assert.deepEqual(
+    errors.filter((e) => e.includes("参照されていません")),
+    [],
+    "動的ジャンプを含むファイルで未参照ラベル検査を誤って実行している",
+  );
 });

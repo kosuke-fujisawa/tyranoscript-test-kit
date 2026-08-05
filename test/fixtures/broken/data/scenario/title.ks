@@ -15,3 +15,9 @@ Hi[p]
 *next
 #
 Next[p]
+
+[jump target="*next"]
+
+*dead_end
+#
+DeadEnd[p]
