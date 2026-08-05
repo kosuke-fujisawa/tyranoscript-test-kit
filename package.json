@@ -1,6 +1,6 @@
 {
   "name": "tyranoscript-test-kit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TyranoScript作品向けのE2Eテストヘルパー(Playwright)とシナリオ静的検査ツール",
   "type": "module",
   "license": "MIT",

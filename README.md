@@ -34,7 +34,7 @@ TyranoScriptでノベルゲームを作っていると、作品が違っても�
 
 ```sh
 # 1. インストール(git依存としてdevDependenciesに追加される)
-npm install -D github:kosuke-fujisawa/tyranoscript-test-kit#v0.2.0
+npm install -D github:kosuke-fujisawa/tyranoscript-test-kit#v0.3.0
 
 # 2. シナリオの静的検査をまず一度実行してみる
 npx tyrano-check-scenario --scenario-dir data/scenario --data-dir data
@@ -63,12 +63,12 @@ npmレジストリへは未発行。GitHubからgit依存として参照する
 // package.json
 {
   "devDependencies": {
-    "tyranoscript-test-kit": "github:kosuke-fujisawa/tyranoscript-test-kit#v0.2.0"
+    "tyranoscript-test-kit": "github:kosuke-fujisawa/tyranoscript-test-kit#v0.3.0"
   }
 }
 ```
 
-バージョンを上げる際は`#v0.2.0`の部分を対象タグに変更し、`npm install`し直す。
+バージョンを上げる際は`#v0.3.0`の部分を対象タグに変更し、`npm install`し直す。
 
 ## 使い方
 

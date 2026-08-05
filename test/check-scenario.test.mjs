@@ -108,3 +108,59 @@ test("動的storageで遷移先ファイルすら特定できない場合はプ�
     "遷移先ファイルを特定できない動的storageがあるのに、他ファイルの未参照ラベル検査を実行している",
   );
 });
+
+test("[jump storage=..]・@jump storage=..の無引用storageも他ファイルのラベルを正しく参照する", () => {
+  const root = join(HERE, "fixtures", "unquoted-storage-cross-file", "data");
+  const { errors } = checkScenario({
+    scenarioDir: join(root, "scenario"),
+    dataDir: root,
+  });
+  assert.deepEqual(
+    errors,
+    [],
+    "storage=b.ks(無引用)を自ファイルの参照先と誤認識し、他ファイルのラベルを誤検出している",
+  );
+});
+
+test("1行に複数の遷移タグがあっても、タグごとにstorage/targetの組を正しく対応させる", () => {
+  const root = join(HERE, "fixtures", "multi-tag-same-line", "data");
+  const { errors } = checkScenario({
+    scenarioDir: join(root, "scenario"),
+    dataDir: root,
+  });
+  assert.deepEqual(
+    errors,
+    [],
+    "同一行の複数タグでstorage/targetが混線し、無関係な組み合わせで誤検出している",
+  );
+});
+
+test("話者行直後がタグでも、タグの後に本文があれば本文欠落として検出しない", () => {
+  const root = join(HERE, "fixtures", "tag-then-body", "data");
+  const { errors } = checkScenario({
+    scenarioDir: join(root, "scenario"),
+    dataDir: root,
+  });
+  const bodyErrors = errors.filter((e) => e.includes("本文がありません"));
+  assert.deepEqual(
+    bodyErrors,
+    [`title.ks:6: "#speaker2" の直後に本文がありません(書き忘れの可能性)`],
+    "タグの直後に本文があるケースを誤検出、またはタグのみで本文が無いケースを見逃している",
+  );
+});
+
+test("無引用属性のアセット参照・キャラクター参照も検査対象にする", () => {
+  const root = join(HERE, "fixtures", "unquoted-attrs", "data");
+  const { errors } = checkScenario({
+    scenarioDir: join(root, "scenario"),
+    dataDir: root,
+  });
+  assert.ok(
+    errors.some((e) => e.includes('storage="missing.png"')),
+    "無引用のstorage=missing.pngによるアセット参照欠落を検出できていない",
+  );
+  assert.ok(
+    errors.some((e) => e.includes('name="ghost"') && e.includes("定義されていません")),
+    "無引用のname=ghostによる未定義キャラクター参照を検出できていない",
+  );
+});

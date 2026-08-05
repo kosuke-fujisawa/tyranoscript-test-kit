@@ -84,17 +84,46 @@ function findKsFiles(dir) {
   return results;
 }
 
-function extractTagAttr(line, tag, attr) {
-  const tagRe = new RegExp(`\\[${tag}\\b[^\\]]*\\]`, "g");
-  const tagMatches = line.match(tagRe);
-  if (!tagMatches) return [];
-  const results = [];
-  for (const tagText of tagMatches) {
-    const attrMatch = tagText.match(new RegExp(`\\b${attr}="([^"]*)"`));
-    if (!attrMatch) continue;
-    results.push({ tagText, value: attrMatch[1] });
+// タグ1つ分の内側テキストから属性を抽出する。TyranoScriptはstorage="a.ks"のような
+// クオート付きと、storage=a.ksのような無引用の両方を許容するため両対応する。
+function parseAttrs(attrText) {
+  const attrs = {};
+  const attrRe = /([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"]*)"|([^\s\]]+))/g;
+  let m;
+  while ((m = attrRe.exec(attrText))) {
+    attrs[m[1]] = m[2] !== undefined ? m[2] : m[3];
   }
-  return results;
+  return attrs;
+}
+
+// 行中から指定タグ名([tag ...]形式)の出現をすべて抽出する。タグごとに属性を
+// 個別に解析するため、1行に複数タグがあってもstorage/targetが混線しない。
+function extractTagOccurrences(line, tagNames) {
+  const tagRe = new RegExp(`\\[(${tagNames.join("|")})\\b([^\\]]*)\\]`, "g");
+  const occurrences = [];
+  let m;
+  while ((m = tagRe.exec(line))) {
+    occurrences.push({ tag: m[1], attrs: parseAttrs(m[2]), raw: m[0] });
+  }
+  return occurrences;
+}
+
+// @jump/@call省略記法(ブラケットを使わない行全体が1つのタグ)を抽出する。
+function extractAtDirective(trimmedLine) {
+  const m = trimmedLine.match(/^@([A-Za-z_][A-Za-z0-9_]*)\b(.*)$/);
+  if (!m) return null;
+  return { tag: m[1], attrs: parseAttrs(m[2]), raw: trimmedLine };
+}
+
+// jump/call/glink/button(ブラケット形式・@jump/@call省略記法)の出現を1行分まとめて抽出する。
+// 検査1・2(参照整合性)と検査7(未参照ラベル検出)で同じ前提を共有するため一箇所にまとめる。
+function extractTransitionOccurrences(trimmedLine) {
+  const occurrences = extractTagOccurrences(trimmedLine, ["jump", "call", "glink", "button"]);
+  const atDirective = extractAtDirective(trimmedLine);
+  if (atDirective && (atDirective.tag === "jump" || atDirective.tag === "call")) {
+    occurrences.push(atDirective);
+  }
+  return occurrences;
 }
 
 /**
@@ -141,28 +170,29 @@ export function checkScenario(options) {
       const lineNo = idx + 1;
       const trimmed = line.trim();
       if (trimmed.startsWith(";")) return;
-      if (!/(@jump|@call|\[jump|\[call|\[glink|\[button)\b/.test(line)) return;
 
-      const isDynamicStorage = /storage="&/.test(line);
-      const storageMatch = line.match(/storage="([^"&][^"]*\.ks)"/);
-      const targetMatch = line.match(/target="?\*([A-Za-z0-9_]+)"?/);
+      for (const { attrs } of extractTransitionOccurrences(trimmed)) {
+        const storage = attrs.storage;
+        const target = attrs.target;
+        const isDynamicStorage = storage?.startsWith("&") ?? false;
 
-      let targetFileKey = key;
-      if (storageMatch) {
-        targetFileKey = storageMatch[1];
-        if (!fileSet.has(targetFileKey)) {
-          errors.push(`${key}:${lineNo}: storage="${targetFileKey}" が見つかりません`);
-          return;
+        let targetFileKey = key;
+        if (storage && !isDynamicStorage) {
+          targetFileKey = storage;
+          if (!fileSet.has(targetFileKey)) {
+            errors.push(`${key}:${lineNo}: storage="${targetFileKey}" が見つかりません`);
+            continue;
+          }
+        } else if (isDynamicStorage) {
+          continue;
         }
-      } else if (isDynamicStorage) {
-        return;
-      }
 
-      if (targetMatch) {
-        const label = targetMatch[1];
-        const labelSet = labelsByFile.get(targetFileKey);
-        if (labelSet && !labelSet.has(label)) {
-          errors.push(`${key}:${lineNo}: ラベル "*${label}" が ${targetFileKey} に見つかりません`);
+        if (target?.startsWith("*")) {
+          const label = target.slice(1);
+          const labelSet = labelsByFile.get(targetFileKey);
+          if (labelSet && !labelSet.has(label)) {
+            errors.push(`${key}:${lineNo}: ラベル "*${label}" が ${targetFileKey} に見つかりません`);
+          }
         }
       }
     });
@@ -177,10 +207,10 @@ export function checkScenario(options) {
       if (trimmed.startsWith(";")) return;
 
       for (const { tag, attr, folder } of assetChecks) {
-        for (const { tagText, value } of extractTagAttr(line, tag, attr)) {
-          if (value.startsWith("&")) continue; // 動的式はスキップ
-          const folderMatch = tagText.match(/\bfolder="([^"]*)"/);
-          const resolvedFolder = folderMatch ? folderMatch[1] : folder;
+        for (const { attrs } of extractTagOccurrences(line, [tag])) {
+          const value = attrs[attr];
+          if (value === undefined || value.startsWith("&")) continue; // 未指定・動的式はスキップ
+          const resolvedFolder = attrs.folder ?? folder;
           const assetPath = join(dataDir, resolvedFolder, value);
           if (!existsSync(assetPath)) {
             errors.push(
@@ -211,7 +241,13 @@ export function checkScenario(options) {
       }
 
       const nextTrimmed = j < lines.length ? lines[j].trim() : "";
-      const hasNoBody = j >= lines.length || /^[#*\[@]/.test(nextTrimmed);
+      // 先頭の[タグ]を全て取り除いてから判定する。[font color=red]本文[p]のように
+      // タグの直後に本文が続くケースを「本文なし」と誤検出しないようにするため。
+      let remainder = nextTrimmed;
+      while (/^\[[^\]]*\]/.test(remainder)) {
+        remainder = remainder.replace(/^\[[^\]]*\]/, "").trimStart();
+      }
+      const hasNoBody = j >= lines.length || remainder === "" || /^[#*@]/.test(remainder);
       if (hasNoBody) {
         errors.push(`${key}:${idx + 1}: "${line.trim()}" の直後に本文がありません(書き忘れの可能性)`);
       }
@@ -259,8 +295,9 @@ export function checkScenario(options) {
       if (EXCLUDE_FILES.has(key)) continue;
       for (const line of content.split(/\r?\n/)) {
         if (line.trim().startsWith(";")) continue;
-        for (const { value } of extractTagAttr(line, "chara_new", "name")) {
-          if (!value.startsWith("&")) definedCharacters.add(value);
+        for (const { attrs } of extractTagOccurrences(line, ["chara_new"])) {
+          const value = attrs.name;
+          if (value !== undefined && !value.startsWith("&")) definedCharacters.add(value);
         }
       }
     }
@@ -271,8 +308,9 @@ export function checkScenario(options) {
         const lineNo = idx + 1;
         if (line.trim().startsWith(";")) return;
         for (const tag of characterTags) {
-          for (const { value } of extractTagAttr(line, tag, "name")) {
-            if (value.startsWith("&")) continue;
+          for (const { attrs } of extractTagOccurrences(line, [tag])) {
+            const value = attrs.name;
+            if (value === undefined || value.startsWith("&")) continue;
             if (!definedCharacters.has(value)) {
               errors.push(
                 `${key}:${lineNo}: [${tag}] name="${value}" は [chara_new] で定義されていません`,
@@ -286,29 +324,19 @@ export function checkScenario(options) {
 
   // --- 7: [jump]/[return]直後の未参照ラベル検出(動的ジャンプを含むファイルはスキップ) ---
   {
-    const bracketJumpRe = /\[(?:jump|call|glink|button)\b[^\]]*\]/g;
     const referenced = new Set(); // "file::label"
     const dynamicFiles = new Set(); // 動的storage/targetを含むため対象外にするファイル
     const dynamicTargetDestinations = new Set(); // 動的targetの遷移先として特定できたファイル(遷移先ラベルは特定不能)
     let dynamicEverywhere = false; // storageが動的で遷移先ファイルすら特定できないジャンプがある
 
-    function extractJumpAttrs(tagText) {
-      // TyranoScriptはstorage/targetをダブルクオート付き/無しの両方で書けるため両対応する
-      const storageMatch = tagText.match(/\bstorage="?([^"\s\]]+)"?/);
-      const targetMatch = tagText.match(/\btarget="?([^"\s\]]+)"?/);
-      return { storage: storageMatch?.[1], target: targetMatch?.[1] };
-    }
-
     for (const [key, content] of contentByFile) {
       for (const line of content.split(/\r?\n/)) {
         const trimmed = line.trim();
         if (trimmed.startsWith(";")) continue;
-        const tagTexts = trimmed.match(bracketJumpRe) ?? [];
-        // ブラケット形式に加え、@jump/@callの省略記法も対象にする(既存の検査1・2と同じ前提)
-        if (/^@(?:jump|call)\b/.test(trimmed)) tagTexts.push(trimmed);
 
-        for (const tagText of tagTexts) {
-          const { storage, target } = extractJumpAttrs(tagText);
+        for (const { attrs } of extractTransitionOccurrences(trimmed)) {
+          const storage = attrs.storage;
+          const target = attrs.target;
           const dynamicStorage = storage?.startsWith("&") ?? false;
           const dynamicTarget = target?.startsWith("&") ?? false;
 
