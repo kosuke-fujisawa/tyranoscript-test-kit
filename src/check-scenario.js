@@ -3,14 +3,26 @@
 //
 //   1. jump/call/glink/button の storage 参照先ファイルが存在するか
 //   2. 同 target のラベルが、参照先(storage指定時)/自ファイル(未指定時)に存在するか
-//   3. bg/image/chara_new/playbgm/playse の storage 参照先アセットが存在するか
-//      (`&式` によるタグ属性は動的評価のためスキップする)
+//   3. bg/image/chara_new/playbgm/playse/glink/button の各画像・音声属性の
+//      参照先アセットが存在するか(`&式` によるタグ属性は動的評価のためスキップする)
 //   4. "#"/"#話者名" 行の直後に本文が一切無いまま次のタグ・ラベルへ進んでいないか
 //   5. 同一の選択肢グループ内で [glink] の text= が重複していないか
+//   6. chara_show/chara_hide/chara_mod/chara_face が参照するキャラクターが
+//      chara_newで定義されているか(プロジェクト全体で横断的にキャラクターを解決する。
+//      TyranoScriptのchara_*タグはファイルスコープではなくランタイム全体で共有される
+//      状態を操作するため、ラベル参照のようにファイル単位では解決しない)
 //
 // 対象外(意図的なスコープ外):
 //   - 到達不能な分岐の検出(制御フロー解析が必要なため)
 //   - 未定義変数の検出(f/sfは動的に生成されるため静的な網羅は困難)
+//   - 未使用ラベル・未使用キャラクターの検出(ファイル間の実行順序に依存するため、
+//     誤検知率が高いと判断し見送った。必要になれば別途追加する)
+//   - 未定義タグ・マクロの検出(全タグを網羅した辞書が無いと誤検知するため見送った)
+//
+// これらのうち後者2つは、エディタ向けのTyranoScript Language Server
+// (https://github.com/void2610/tyranoscript-lsp) がワークスペース全体の索引を
+// 前提により踏み込んだ形で実装している。本パッケージはCIでそのまま実行できる
+// 軽量な検査に用途を絞り、参考にしつつ独立して実装している。
 //
 // 各作品固有の追加検査(例: 多言語ミラー構成の整合性チェックなど)は、この関数の
 // 結果を土台に呼び出し側で追加すること。このパッケージは複数のTyranoScript作品で
@@ -19,16 +31,32 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-/** @typedef {{ scenarioDir: string, dataDir: string, excludeFiles?: string[], assetTagBase?: Record<string, string | null> }} CheckScenarioOptions */
+/**
+ * @typedef {{ tag: string, attr: string, folder: string }} AssetCheck
+ * @typedef {{
+ *   scenarioDir: string,
+ *   dataDir: string,
+ *   excludeFiles?: string[],
+ *   assetChecks?: AssetCheck[],
+ *   characterTags?: string[],
+ * }} CheckScenarioOptions
+ */
 
-const DEFAULT_ASSET_TAG_BASE = {
-  bg: "bgimage",
-  image: "image",
-  chara_new: "fgimage",
-  chara_config: null, // storageを取らない
-  playbgm: "bgm",
-  playse: "sound",
-};
+const DEFAULT_ASSET_CHECKS = [
+  { tag: "bg", attr: "storage", folder: "bgimage" },
+  { tag: "image", attr: "storage", folder: "image" },
+  { tag: "chara_new", attr: "storage", folder: "fgimage" },
+  { tag: "playbgm", attr: "storage", folder: "bgm" },
+  { tag: "playse", attr: "storage", folder: "sound" },
+  { tag: "glink", attr: "graphic", folder: "image" },
+  { tag: "glink", attr: "enterimg", folder: "image" },
+  { tag: "button", attr: "graphic", folder: "image" },
+  { tag: "button", attr: "enterimg", folder: "image" },
+  { tag: "button", attr: "clickimg", folder: "image" },
+];
+
+// name=を参照だけして定義はしないタグ(chara_newが定義側)
+const DEFAULT_CHARACTER_REFERENCE_TAGS = ["chara_show", "chara_hide", "chara_mod", "chara_face"];
 
 function findKsFiles(dir) {
   let results = [];
@@ -44,12 +72,31 @@ function findKsFiles(dir) {
   return results;
 }
 
+function extractTagAttr(line, tag, attr) {
+  const tagRe = new RegExp(`\\[${tag}\\b[^\\]]*\\]`, "g");
+  const tagMatches = line.match(tagRe);
+  if (!tagMatches) return [];
+  const results = [];
+  for (const tagText of tagMatches) {
+    const attrMatch = tagText.match(new RegExp(`\\b${attr}="([^"]*)"`));
+    if (!attrMatch) continue;
+    results.push({ tagText, value: attrMatch[1] });
+  }
+  return results;
+}
+
 /**
  * @param {CheckScenarioOptions} options
  * @returns {{ fileCount: number, errors: string[] }}
  */
 export function checkScenario(options) {
-  const { scenarioDir, dataDir, excludeFiles = [], assetTagBase = DEFAULT_ASSET_TAG_BASE } = options;
+  const {
+    scenarioDir,
+    dataDir,
+    excludeFiles = [],
+    assetChecks = DEFAULT_ASSET_CHECKS,
+    characterTags = DEFAULT_CHARACTER_REFERENCE_TAGS,
+  } = options;
   const EXCLUDE_FILES = new Set(excludeFiles);
 
   function toScenarioKey(absPath) {
@@ -109,7 +156,7 @@ export function checkScenario(options) {
     });
   }
 
-  // --- 3: アセット参照の整合性(静的storageのみ) ---
+  // --- 3: アセット参照の整合性(静的な値のみ。folder=属性があれば既定を上書きする) ---
   for (const [key, content] of contentByFile) {
     if (EXCLUDE_FILES.has(key)) continue;
     content.split(/\r?\n/).forEach((line, idx) => {
@@ -117,21 +164,15 @@ export function checkScenario(options) {
       const trimmed = line.trim();
       if (trimmed.startsWith(";")) return;
 
-      for (const [tag, baseDir] of Object.entries(assetTagBase)) {
-        if (!baseDir) continue;
-        const tagRe = new RegExp(`\\[${tag}\\b[^\\]]*\\]`, "g");
-        const tagMatches = line.match(tagRe);
-        if (!tagMatches) continue;
-
-        for (const tagText of tagMatches) {
-          if (/storage="&/.test(tagText)) continue;
-          if (/folder="image"/.test(tagText)) continue; // folder明示指定は既定のマッピングと異なるためスキップ
-          const storageMatch = tagText.match(/storage="([^"]+)"/);
-          if (!storageMatch) continue;
-          const assetPath = join(dataDir, baseDir, storageMatch[1]);
+      for (const { tag, attr, folder } of assetChecks) {
+        for (const { tagText, value } of extractTagAttr(line, tag, attr)) {
+          if (value.startsWith("&")) continue; // 動的式はスキップ
+          const folderMatch = tagText.match(/\bfolder="([^"]*)"/);
+          const resolvedFolder = folderMatch ? folderMatch[1] : folder;
+          const assetPath = join(dataDir, resolvedFolder, value);
           if (!existsSync(assetPath)) {
             errors.push(
-              `${key}:${lineNo}: [${tag}] storage="${storageMatch[1]}" (${baseDir}/) が見つかりません`,
+              `${key}:${lineNo}: [${tag}] ${attr}="${value}" (${resolvedFolder}/) が見つかりません`,
             );
           }
         }
@@ -199,7 +240,39 @@ export function checkScenario(options) {
     flushGroup();
   }
 
+  // --- 6: 未定義キャラクター参照の検出(プロジェクト全体でchara_newを解決) ---
+  {
+    const definedCharacters = new Set();
+    for (const [key, content] of contentByFile) {
+      if (EXCLUDE_FILES.has(key)) continue;
+      for (const line of content.split(/\r?\n/)) {
+        if (line.trim().startsWith(";")) continue;
+        for (const { value } of extractTagAttr(line, "chara_new", "name")) {
+          if (!value.startsWith("&")) definedCharacters.add(value);
+        }
+      }
+    }
+
+    for (const [key, content] of contentByFile) {
+      if (EXCLUDE_FILES.has(key)) continue;
+      content.split(/\r?\n/).forEach((line, idx) => {
+        const lineNo = idx + 1;
+        if (line.trim().startsWith(";")) return;
+        for (const tag of characterTags) {
+          for (const { value } of extractTagAttr(line, tag, "name")) {
+            if (value.startsWith("&")) continue;
+            if (!definedCharacters.has(value)) {
+              errors.push(
+                `${key}:${lineNo}: [${tag}] name="${value}" は [chara_new] で定義されていません`,
+              );
+            }
+          }
+        }
+      });
+    }
+  }
+
   return { fileCount: files.length, errors };
 }
 
-export { DEFAULT_ASSET_TAG_BASE };
+export { DEFAULT_ASSET_CHECKS, DEFAULT_CHARACTER_REFERENCE_TAGS };

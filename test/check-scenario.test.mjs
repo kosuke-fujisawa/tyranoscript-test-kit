@@ -39,4 +39,12 @@ test("壊れたシナリオで既知の問題をすべて検出する", () => {
     errors.some((e) => e.includes('text="Start"') && e.includes("重複")),
     "選択肢の重複テキストを検出できていない",
   );
+  assert.ok(
+    errors.some((e) => e.includes('[chara_show] name="ghost"') && e.includes("定義されていません")),
+    "未定義キャラクターへの参照を検出できていない",
+  );
+  assert.ok(
+    errors.some((e) => e.includes('graphic="does_not_exist.png"')),
+    "glinkのgraphic参照アセット欠落を検出できていない",
+  );
 });

@@ -23,7 +23,7 @@ npmレジストリへは未発行。GitHubからgit依存として参照する�
 // package.json
 {
   "devDependencies": {
-    "tyranoscript-test-kit": "github:kosuke-fujisawa/tyranoscript-test-kit#v0.1.0"
+    "tyranoscript-test-kit": "github:kosuke-fujisawa/tyranoscript-test-kit#v0.2.0"
   }
 }
 ```
@@ -74,11 +74,21 @@ const { fileCount, errors } = checkScenario({
 
 1. `jump`/`call`/`glink`/`button`の`storage`参照先ファイルが存在するか
 2. 同`target`のラベルが、参照先(`storage`指定時)/自ファイル(未指定時)に存在するか
-3. `bg`/`image`/`chara_new`/`playbgm`/`playse`の`storage`参照先アセットが存在するか
+3. `bg`/`image`/`chara_new`/`playbgm`/`playse`/`glink`/`button`の各画像・音声属性
+   (`storage`/`graphic`/`enterimg`/`clickimg`)の参照先アセットが存在するか
+   (タグに`folder=`属性があれば既定のフォルダを上書きする)
 4. `#`/`#話者名`行の直後に本文が一切無いまま次のタグ・ラベルへ進んでいないか
 5. 同一の選択肢グループ内で`[glink]`の`text=`が重複していないか
+6. `chara_show`/`chara_hide`/`chara_mod`/`chara_face`が参照するキャラクターが
+   `chara_new`で定義されているか(プロジェクト全体で横断的に解決する)
 
-対象外(意図的なスコープ外): 到達不能な分岐の検出、未定義変数の検出。
+対象外(意図的なスコープ外): 到達不能な分岐の検出、未定義変数の検出、未使用ラベル・
+未使用キャラクターの検出(ファイル間の実行順序に依存し誤検知率が高いため見送り)、
+未定義タグ・マクロの検出(網羅的なタグ辞書が無いため見送り)。
+
+これらのより踏み込んだ検査は、エディタ向けのTyranoScript Language Server
+([tyranoscript-lsp](https://github.com/void2610/tyranoscript-lsp))がワークスペース索引を
+前提に実装している。本パッケージはCIでそのまま実行できる軽量な検査に用途を絞っている。
 
 ## ライセンス
 
