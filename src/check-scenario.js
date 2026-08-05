@@ -11,12 +11,16 @@
 //      chara_newで定義されているか(プロジェクト全体で横断的にキャラクターを解決する。
 //      TyranoScriptのchara_*タグはファイルスコープではなくランタイム全体で共有される
 //      状態を操作するため、ラベル参照のようにファイル単位では解決しない)
-//   7. [jump]/[return]の直後にあり、かつプロジェクト内のどこからも参照されない
-//      ラベルの検出(未参照ラベル警告)。直前の行が静的なstorage/targetを持つ
-//      [jump]または[return]の場合のみ「フォールスルーで到達しない」とみなす
-//      保守的な判定(誤検知を避けるため、選択肢グループの後や[s]の後は対象外)。
-//      storage="&式"/target="&式"による動的ジャンプを含むファイルは、到達可否を
-//      静的に判定できないため検査対象から除外する
+//   7. [jump]/[return](@jump省略記法・無引用属性を含む)の直後にあり、かつ
+//      プロジェクト内のどこからも参照されないラベルの検出(未参照ラベル警告)。
+//      直前の行が静的なstorage/targetを持つ[jump]または[return]の場合のみ
+//      「フォールスルーで到達しない」とみなす保守的な判定(誤検知を避けるため、
+//      選択肢グループの後や[s]の後は対象外)。動的ジャンプ(storage/targetが
+//      "&式")は到達可否を静的に判定できないため、以下の単位で検査対象から除外する:
+//        - 遷移元ファイル: 動的storage/targetを含むファイル自身
+//        - 遷移先ファイル: storageが静的でtargetのみ動的な場合、遷移先ファイルの
+//          ラベルは特定できないため遷移先ファイルごと除外する
+//        - プロジェクト全体: storageが動的で遷移先ファイルすら特定できない場合
 //
 // 対象外(意図的なスコープ外):
 //   - 完全な到達可能性解析(選択肢分岐・複雑な制御フローを網羅した到達不能検出。
@@ -282,60 +286,80 @@ export function checkScenario(options) {
 
   // --- 7: [jump]/[return]直後の未参照ラベル検出(動的ジャンプを含むファイルはスキップ) ---
   {
-    const jumpLikeRe = /\[(?:jump|call|glink|button)\b[^\]]*\]/g;
+    const bracketJumpRe = /\[(?:jump|call|glink|button)\b[^\]]*\]/g;
     const referenced = new Set(); // "file::label"
-    const hasDynamicJump = new Map(); // file -> boolean
+    const dynamicFiles = new Set(); // 動的storage/targetを含むため対象外にするファイル
+    const dynamicTargetDestinations = new Set(); // 動的targetの遷移先として特定できたファイル(遷移先ラベルは特定不能)
+    let dynamicEverywhere = false; // storageが動的で遷移先ファイルすら特定できないジャンプがある
 
-    for (const [key, content] of contentByFile) {
-      let dynamic = false;
-      for (const line of content.split(/\r?\n/)) {
-        if (line.trim().startsWith(";")) continue;
-        const tags = line.match(jumpLikeRe);
-        if (!tags) continue;
-        for (const tagText of tags) {
-          const storageMatch = tagText.match(/\bstorage="([^"]*)"/);
-          const targetMatch = tagText.match(/\btarget="([^"]*)"/);
-          if (
-            (storageMatch && storageMatch[1].startsWith("&")) ||
-            (targetMatch && targetMatch[1].startsWith("&"))
-          ) {
-            dynamic = true;
-            continue;
-          }
-          const targetFileKey =
-            storageMatch && !storageMatch[1].startsWith("&") ? storageMatch[1] : key;
-          if (targetMatch && targetMatch[1].startsWith("*")) {
-            referenced.add(`${targetFileKey}::${targetMatch[1].slice(1)}`);
-          }
-        }
-      }
-      hasDynamicJump.set(key, dynamic);
+    function extractJumpAttrs(tagText) {
+      // TyranoScriptはstorage/targetをダブルクオート付き/無しの両方で書けるため両対応する
+      const storageMatch = tagText.match(/\bstorage="?([^"\s\]]+)"?/);
+      const targetMatch = tagText.match(/\btarget="?([^"\s\]]+)"?/);
+      return { storage: storageMatch?.[1], target: targetMatch?.[1] };
     }
 
     for (const [key, content] of contentByFile) {
-      if (EXCLUDE_FILES.has(key)) continue;
-      if (hasDynamicJump.get(key)) continue;
-
-      const lines = content.split(/\r?\n/);
-      let cutByJump = false;
-      lines.forEach((line, idx) => {
+      for (const line of content.split(/\r?\n/)) {
         const trimmed = line.trim();
-        if (trimmed === "" || trimmed.startsWith(";")) return;
+        if (trimmed.startsWith(";")) continue;
+        const tagTexts = trimmed.match(bracketJumpRe) ?? [];
+        // ブラケット形式に加え、@jump/@callの省略記法も対象にする(既存の検査1・2と同じ前提)
+        if (/^@(?:jump|call)\b/.test(trimmed)) tagTexts.push(trimmed);
 
-        const labelMatch = trimmed.match(/^\*([A-Za-z0-9_]+)/);
-        if (labelMatch) {
-          const label = labelMatch[1];
-          if (cutByJump && !referenced.has(`${key}::${label}`)) {
-            errors.push(
-              `${key}:${idx + 1}: ラベル "*${label}" は [jump]/[return] の直後にありますが、プロジェクト内のどこからも参照されていません(到達不能の可能性)`,
-            );
+        for (const tagText of tagTexts) {
+          const { storage, target } = extractJumpAttrs(tagText);
+          const dynamicStorage = storage?.startsWith("&") ?? false;
+          const dynamicTarget = target?.startsWith("&") ?? false;
+
+          if (!dynamicStorage && !dynamicTarget) {
+            if (target?.startsWith("*")) {
+              const targetFileKey = storage ?? key;
+              referenced.add(`${targetFileKey}::${target.slice(1)}`);
+            }
+            continue;
           }
-          cutByJump = false;
-          return;
-        }
 
-        cutByJump = /^\[(?:jump|return)\b[^\]]*\]$/.test(trimmed);
-      });
+          // 遷移元ファイルは、自身のラベルが動的に参照されている可能性を排除できないため対象外にする
+          dynamicFiles.add(key);
+          if (dynamicStorage) {
+            // 遷移先ファイルすら特定できないため、プロジェクト全体で検査を無効化する
+            dynamicEverywhere = true;
+          } else {
+            // storageは静的なので遷移先ファイルは分かるが、targetが動的でラベルは特定できない
+            dynamicTargetDestinations.add(storage ?? key);
+          }
+        }
+      }
+    }
+
+    if (!dynamicEverywhere) {
+      for (const [key, content] of contentByFile) {
+        if (EXCLUDE_FILES.has(key)) continue;
+        if (dynamicFiles.has(key) || dynamicTargetDestinations.has(key)) continue;
+
+        const lines = content.split(/\r?\n/);
+        let cutByJump = false;
+        lines.forEach((line, idx) => {
+          const trimmed = line.trim();
+          if (trimmed === "" || trimmed.startsWith(";")) return;
+
+          const labelMatch = trimmed.match(/^\*([A-Za-z0-9_]+)/);
+          if (labelMatch) {
+            const label = labelMatch[1];
+            if (cutByJump && !referenced.has(`${key}::${label}`)) {
+              errors.push(
+                `${key}:${idx + 1}: ラベル "*${label}" は [jump]/[return] の直後にありますが、プロジェクト内のどこからも参照されていません(到達不能の可能性)`,
+              );
+            }
+            cutByJump = false;
+            return;
+          }
+
+          cutByJump =
+            /^\[(?:jump|return)\b[^\]]*\]$/.test(trimmed) || /^@jump\b/.test(trimmed);
+        });
+      }
     }
   }
 
