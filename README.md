@@ -34,7 +34,7 @@ TyranoScriptでノベルゲームを作っていると、作品が違っても�
 
 ```sh
 # 1. インストール(git依存としてdevDependenciesに追加される)
-npm install -D github:kosuke-fujisawa/tyranoscript-test-kit#v0.3.0
+npm install -D github:kosuke-fujisawa/tyranoscript-test-kit#v0.5.0
 
 # 2. シナリオの静的検査をまず一度実行してみる
 npx tyrano-check-scenario --scenario-dir data/scenario --data-dir data
@@ -63,12 +63,12 @@ npmレジストリへは未発行。GitHubからgit依存として参照する
 // package.json
 {
   "devDependencies": {
-    "tyranoscript-test-kit": "github:kosuke-fujisawa/tyranoscript-test-kit#v0.3.0"
+    "tyranoscript-test-kit": "github:kosuke-fujisawa/tyranoscript-test-kit#v0.5.0"
   }
 }
 ```
 
-バージョンを上げる際は`#v0.3.0`の部分を対象タグに変更し、`npm install`し直す。
+バージョンを上げる際は`#v0.5.0`の部分を対象タグに変更し、`npm install`し直す。
 
 ## 使い方
 
@@ -92,6 +92,26 @@ test("start -> ending", async ({ page }) => {
 | `advanceUntilVisible(page, text, maxClicks?)` | `text`が表示されるまでメッセージ領域をクリックして進める |
 | `advanceUntil(page, target, maxClicks?, clickPoint?)` | 任意のLocatorが表示されるまでクリックして進める(`advanceUntilVisible`の汎用版) |
 | `waitForTextSettled(page)` | 文字送りアニメーションの完了を待つ。セーブ処理の直前に必須 |
+| `runScenarioSnippet(page, script)` | 仮想シナリオ(`script`)を`kag.cache_scenario`へ注入し`[jump]`で実行する。共通ルートの再生やUI操作を経由せず、`[macro]`登録済みのユーザー定義マクロを実際の呼び出し経路で直接検証したい場合に使う(判定ロジックをJavaScriptへ複製しない)。完了待ちは呼び出し側の責務 |
+
+`runScenarioSnippet`の使用例(マクロの直接検証):
+
+```ts
+import { openTitle, runScenarioSnippet } from "tyranoscript-test-kit";
+
+test("resolve_route macro", async ({ page }) => {
+  await openTitle(page, "Start"); // マクロは[macro]定義済みである必要がある(通常はゲーム起動時に登録済み)
+
+  await page.evaluate(() => {
+    window.TYRANO.kag.stat.f.affection_natsuki = 6;
+  });
+  await runScenarioSnippet(page, "[resolve_route]");
+
+  await expect
+    .poll(() => page.evaluate(() => window.TYRANO.kag.stat.f.selected_route))
+    .toBe("natsuki");
+});
+```
 
 ### シナリオ静的検査(CLI)
 
@@ -140,7 +160,7 @@ CIでE2Eが失敗した際、trace/screenshotを含むレポート(`playwright-r
 - run: npm run e2e
 - name: Upload Playwright report
   if: failure()
-  uses: kosuke-fujisawa/tyranoscript-test-kit/.github/actions/upload-playwright-report@v0.4.0
+  uses: kosuke-fujisawa/tyranoscript-test-kit/.github/actions/upload-playwright-report@v0.5.0
 ```
 
 `if: failure()`(またはそれに準じる条件)は呼び出し側のワークフローで指定する。
@@ -150,8 +170,8 @@ CIでE2Eが失敗した際、trace/screenshotを含むレポート(`playwright-r
 
 1. `jump`/`call`/`glink`/`button`の`storage`参照先ファイルが存在するか
 2. 同`target`のラベルが、参照先(`storage`指定時)/自ファイル(未指定時)に存在するか
-3. `bg`/`image`/`chara_new`/`playbgm`/`playse`/`glink`/`button`の各画像・音声属性
-   (`storage`/`graphic`/`enterimg`/`clickimg`)の参照先アセットが存在するか
+3. `bg`/`image`/`chara_new`/`playbgm`/`playse`/`movie`/`glink`/`button`の各画像・音声・
+   動画属性(`storage`/`graphic`/`enterimg`/`clickimg`)の参照先アセットが存在するか
    (タグに`folder=`属性があれば既定のフォルダを上書きする)
 4. `#`/`#話者名`行の直後に本文が一切無いまま次のタグ・ラベルへ進んでいないか
 5. 同一の選択肢グループ内で`[glink]`の`text=`が重複していないか
@@ -165,6 +185,7 @@ CIでE2Eが失敗した際、trace/screenshotを含むレポート(`playwright-r
    静的に判定できないため、遷移元ファイル・(storageのみ静的な場合の)遷移先
    ファイル・(storageも動的な場合の)プロジェクト全体、のいずれかの単位で検査
    対象から除外する
+8. 同一ファイル内に同名の`*label`が重複定義されていないか
 
 対象外(意図的なスコープ外): 選択肢分岐・複雑な制御フローを網羅した完全な到達可能性解析
 (項目7は「静的jump/returnの直後」という限定条件のみを対象とする)、未定義変数の検出、
