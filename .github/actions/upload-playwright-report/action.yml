@@ -1,0 +1,27 @@
+name: "Upload Playwright report"
+description: >-
+  失敗したE2E(Playwright)のtrace/screenshotを含むレポート(playwright-report/・
+  test-results/)をartifactとしてアップロードする。呼び出し側のワークフローで
+  `if: failure()`等の実行条件を指定すること(このactionは呼び出されたら常にアップロードを試みる)。
+  playwright-report/はhtmlレポーター、test-results/はtrace/screenshot設定を
+  各作品のplaywright.config.tsで有効にしていることが前提。
+inputs:
+  name:
+    description: "アップロードするartifact名"
+    required: false
+    default: "playwright-report"
+  retention-days:
+    description: "artifactの保持日数"
+    required: false
+    default: "7"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: |
+          playwright-report/
+          test-results/
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: warn
