@@ -84,3 +84,34 @@ export async function waitForTextSettled(page) {
     { timeout: 10_000 },
   );
 }
+
+/**
+ * 仮想シナリオ(scriptで指定したKAGタグ列)を実行する。共通ルートの再生や
+ * UI操作(選択肢クリック等)を経由せず、[macro]で登録済みのユーザー定義マクロや
+ * 個々のタグを、実際の呼び出し経路を通して直接実行したい場合に使う
+ * (ロジックのJavaScriptへの複製を避けるため)。
+ *
+ * ユーザー定義マクロはkag.stat.map_macroに登録され、実際の呼び出しはscriptを
+ * 読み進める過程でのjump/スタックpush/popを伴う。kag.ftag.startTag()は組み込み
+ * タグ(master_tag)しか直接呼べないため使えない。代わりに、TyranoScriptが
+ * シナリオファイルの取得よりも先にkag.cache_scenarioを参照する挙動を利用し、
+ * scriptをその場でパースしてキャッシュへ注入してから[jump]する。ファイルへの
+ * 書き出しは行わないため、消費側リポジトリに新規ファイルは増えない。
+ *
+ * 呼び出し後の完了待ち(特定の状態変数のポーリング等)は呼び出し側の責務とする
+ * (scriptの内容次第で完了条件が異なるため、このヘルパーでは判定しない)。
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} script 実行したいタグを含むKAGスクリプトの断片(例: `"[resolve_route]"`、
+ *   複数行可)。呼び出し側でラベルや[s]を含める必要はない(自動的に付与される)。
+ */
+export async function runScenarioSnippet(page, script) {
+  await page.evaluate((script) => {
+    const kag = window.TYRANO.kag;
+    const label = "e2e_snippet";
+    const fileName = "__e2e_snippet.ks";
+    const fullScript = `*${label}\n${script}\n[s]\n`;
+    kag.cache_scenario["./data/scenario/" + fileName] = kag.parser.parseScenario(fullScript);
+    kag.ftag.startTag("jump", { target: "*" + label, storage: fileName });
+  }, script);
+}

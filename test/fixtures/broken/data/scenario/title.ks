@@ -11,6 +11,7 @@ Hi[p]
 [glink text="Start" target="*missing_label" graphic="does_not_exist.png"]
 [glink text="Start" target="*next"]
 [jump storage="missing.ks"]
+[movie storage="missing_video.mp4"]
 
 *next
 #
@@ -21,3 +22,11 @@ Next[p]
 *dead_end
 #
 DeadEnd[p]
+
+*dup_label
+#
+Dup[p]
+
+*dup_label
+#
+Dup again[p]

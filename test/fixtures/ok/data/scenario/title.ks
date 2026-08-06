@@ -8,6 +8,8 @@ Hello[p]
 [chara_mod name="hero" face="smile"]
 [chara_hide name="hero"]
 
+[movie storage="intro.mp4"]
+
 [glink text="Start" target="*next" graphic="button_ok.png"]
 [glink text="Options" target="*next2"]
 

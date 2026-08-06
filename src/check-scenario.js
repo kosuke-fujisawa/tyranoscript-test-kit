@@ -21,6 +21,7 @@
 //        - 遷移先ファイル: storageが静的でtargetのみ動的な場合、遷移先ファイルの
 //          ラベルは特定できないため遷移先ファイルごと除外する
 //        - プロジェクト全体: storageが動的で遷移先ファイルすら特定できない場合
+//   8. 同一ファイル内に同名の *label が重複定義されていないか
 //
 // 対象外(意図的なスコープ外):
 //   - 完全な到達可能性解析(選択肢分岐・複雑な制御フローを網羅した到達不能検出。
@@ -60,6 +61,7 @@ const DEFAULT_ASSET_CHECKS = [
   { tag: "chara_new", attr: "storage", folder: "fgimage" },
   { tag: "playbgm", attr: "storage", folder: "bgm" },
   { tag: "playse", attr: "storage", folder: "sound" },
+  { tag: "movie", attr: "storage", folder: "video" },
   { tag: "glink", attr: "graphic", folder: "image" },
   { tag: "glink", attr: "enterimg", folder: "image" },
   { tag: "button", attr: "graphic", folder: "image" },
@@ -387,6 +389,26 @@ export function checkScenario(options) {
           cutByJump =
             /^\[(?:jump|return)\b[^\]]*\]$/.test(trimmed) || /^@jump\b/.test(trimmed);
         });
+      }
+    }
+  }
+
+  // --- 8: 同一ファイル内の *label 重複定義検出 ---
+  for (const [key, content] of contentByFile) {
+    if (EXCLUDE_FILES.has(key)) continue;
+    const lineNumbersByLabel = new Map();
+    content.split(/\r?\n/).forEach((line, idx) => {
+      const m = line.match(/^\s*\*([A-Za-z0-9_]+)/);
+      if (!m) return;
+      const lineNumbers = lineNumbersByLabel.get(m[1]) ?? [];
+      lineNumbers.push(idx + 1);
+      lineNumbersByLabel.set(m[1], lineNumbers);
+    });
+    for (const [label, lineNumbers] of lineNumbersByLabel) {
+      if (lineNumbers.length > 1) {
+        errors.push(
+          `${key}: ラベル "*${label}" が同一ファイル内で重複定義されています(行 ${lineNumbers.join(", ")})`,
+        );
       }
     }
   }

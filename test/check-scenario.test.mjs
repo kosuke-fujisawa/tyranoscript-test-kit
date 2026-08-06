@@ -51,6 +51,23 @@ test("壊れたシナリオで既知の問題をすべて検出する", () => {
     errors.some((e) => e.includes('ラベル "*dead_end"') && e.includes("参照されていません")),
     "[jump]直後の未参照ラベルを検出できていない",
   );
+  assert.ok(
+    errors.some((e) => e.includes('[movie] storage="missing_video.mp4"')),
+    "movieのstorage参照アセット欠落を検出できていない",
+  );
+  assert.ok(
+    errors.some((e) => e.includes('ラベル "*dup_label"') && e.includes("重複定義")),
+    "同一ファイル内の重複ラベル定義を検出できていない",
+  );
+});
+
+test("正常なシナリオの[movie]参照は誤検知しない", () => {
+  const root = join(HERE, "fixtures", "ok", "data");
+  const { errors } = checkScenario({
+    scenarioDir: join(root, "scenario"),
+    dataDir: root,
+  });
+  assert.deepEqual(errors, [], "存在するmovie参照(intro.mp4)を誤って参照切れとして検出している");
 });
 
 test("動的ジャンプ(storage=\"&...\")を含むファイルは未参照ラベル検査をスキップする", () => {
