@@ -127,6 +127,25 @@ const { fileCount, errors } = checkScenario({
 });
 ```
 
+### GitHub Actions: 失敗時のPlaywrightレポートアップロード
+
+CIでE2Eが失敗した際、trace/screenshotを含むレポート(`playwright-report/`・
+`test-results/`)をartifactとして保存するcomposite action。arikoi・quality-prism
+双方のCIで同じアップロード手順が重複していたため切り出した。
+
+呼び出し側の`playwright.config.ts`で`use.trace`/`use.screenshot`、および
+`reporter`に`html`を含めておく必要がある(このaction自体はPlaywright設定を行わない)。
+
+```yaml
+- run: npm run e2e
+- name: Upload Playwright report
+  if: failure()
+  uses: kosuke-fujisawa/tyranoscript-test-kit/.github/actions/upload-playwright-report@v0.4.0
+```
+
+`if: failure()`(またはそれに準じる条件)は呼び出し側のワークフローで指定する。
+このaction自体は呼び出されると常にアップロードを試みる。
+
 ## 検査項目
 
 1. `jump`/`call`/`glink`/`button`の`storage`参照先ファイルが存在するか
