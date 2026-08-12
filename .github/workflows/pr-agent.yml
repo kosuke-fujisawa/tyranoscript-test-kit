@@ -12,6 +12,7 @@ permissions:
 jobs:
   pr_agent:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: PR Agent
         uses: qodo-ai/pr-agent@4a26c38d33d16ea490d6f0dd5c11b06e6c2f2cac # main (2026-08-05時点)
