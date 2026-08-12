@@ -27,7 +27,7 @@
     "LICENSE"
   ],
   "peerDependencies": {
-    "@playwright/test": ">=1.40.0"
+    "@playwright/test": ">=1.40.0 <2"
   },
   "engines": {
     "node": ">=18"
