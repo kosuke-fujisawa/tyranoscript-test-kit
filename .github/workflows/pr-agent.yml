@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: PR Agent
-        uses: qodo-ai/pr-agent@20bc0fe8ae7c1494c0be580f7ceb35a1c45e5741 # main (2026-08-05時点)
+        uses: qodo-ai/pr-agent@ff7af3f06efd3c5ae5dd1dc6b257d1b182706704 # main (2026-08-05時点)
         env:
           OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
